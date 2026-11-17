@@ -1,0 +1,5 @@
+# Tkinter/ttk and sqlite3 come with the standard Windows Python installation.
+# They are not installed with pip.
+
+# Build dependency: packages the desktop app as a Windows executable.
+pyinstaller
