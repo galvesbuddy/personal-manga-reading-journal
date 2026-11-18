@@ -1,42 +1,31 @@
 # Personal Manga Reading Journal
 
-A local desktop manga journal built with Python, Tkinter, and SQLite. The
+A local desktop manga journal built with Python, Tkinter (styled with ttkbootstrap), and SQLite. The
 current version lets you add manga, read saved reviews, edit entries,
 delete selected entries, search titles, filter by status, and sort by rating. Your
-library persists across application restarts. The interface is a basic
-functional version; visual styling is the next step.
+library persists across application restarts.
 
-## Setup (Git Bash on Windows)
+### Library and review
+
+![Library and review](docs/images/ui-review.png)
+
+### Add or edit manga
+
+![Manga editor](docs/images/ui-editor.png)
+
+## Setup 
 
 All commands and relative paths in this README assume your current directory
 is the project root, `personal-manga-reading-journal/`. Use a Unix-based terminal to run the commands below.
 
+To build Python version must be at least 3.10, as required by ttkbootstrap and the project's type
+annotations.
+
 ```bash
 python -m venv .venv
-source .venv/Scripts/activate
+source .venv/Scripts/activate # Windows
 python -m pip install -r requirements/requirements.txt
 ```
-
-Windows virtual environments use `Scripts/`, even in Git Bash. In each new
-terminal session, run `source .venv/Scripts/activate` before using the project.
-
-The requirements file lists third-party packages; pip installs them into
-`.venv`. Currently, PyInstaller is the only third-party dependency, used to
-package the app as an executable. Its own dependencies are installed by pip.
-
-Tkinter/ttk and `sqlite3` are standard-library modules normally included with
-Windows Python installations. Do not install packages named `tkinter` or
-`sqlite3` with pip. If either module is missing, modify or reinstall Python
-with the corresponding support enabled.
-
-Verify Tkinter by opening its demonstration window:
-
-```bash
-python -m tkinter
-```
-
-In VS Code, use **Python: Select Interpreter** to select
-`.venv/Scripts/python.exe`.
 
 ## Run the application
 
@@ -45,6 +34,8 @@ With the virtual environment active, run:
 ```bash
 python main.py
 ```
+
+### Library actions
 
 A window titled **Manga Library** opens with the saved-manga list on the left
 and the selected manga's title and review on the right. The first manga is
@@ -130,53 +121,16 @@ The single `manga` table contains `id`, `title`, `status`, `rating`,
 `current_chapter`, and `review`. SQL constraints back up input validation, and
 parameterized queries keep user text separate from SQL instructions.
 Search and sorting happen in the library layer for this small local collection;
-search uses Python's Unicode-aware case folding. The table structure is
-unchanged, so saved entries and reviews remain available without a migration.
-
-## Verify the workflows
-
-Use **New manga** to add an entry with chapter 10.5, a review, and Automatic
-status. Confirm Reading appears in the list and the saved review appears on
-the right. Close and reopen the app to verify both remain. Ratings of 0 and
-blank should display as 0 and Unrated respectively.
-
-Edit an entry's title and review, save, then restart to verify the changes
-without an extra row. Try another edit and Cancel; the original values should
-remain. Invalid input should show an explanation and leave the draft intact.
-Cancel a deletion to verify the entry stays, then confirm deletion and restart
-to verify it is gone. Switching away from an unsaved draft should let you keep
-working or confirm discarding it.
-
-Combine a title fragment with a status filter, then try both rating orders.
-Check that unrated entries stay last, 0 remains a valid rating, and equal
-ratings stay alphabetically ordered. Search for a nonexistent title, then
-Reset to restore the list. If an edit changes an entry so it no longer matches
-the current filter, confirm the saved-but-hidden message and use Reset to
-find the updated entry.
-
-Select two rows with Ctrl+click and confirm the selection count and disabled
-Edit button. Cancel their deletion and check that both entries remain. Filter
-the list, Select all, then confirm deletion; only the displayed matching manga
-should be removed. Reset should reveal previously hidden entries. Verify
-deletions persist after restarting. Tests exercise these operations only on
-temporary libraries.
-
-Run the automated storage, validation, and UI workflow checks with:
-
-```bash
-python -m unittest discover -v
-```
-
-Tests use temporary databases and do not modify your personal library. UI
-tests create hidden Tkinter windows and require a graphical session; they are
-skipped when no display is available.
+search uses Python's Unicode-aware case folding.
 
 ## Build a Windows executable
 
-From the project root, with the virtual environment active:
+From the project root, use the virtual environment's Python explicitly so
+PyInstaller can include the installed runtime dependencies. These commands
+work in Git Bash even if the environment has not been activated:
 
 ```bash
-python -m PyInstaller --onedir --name MangaLibrary --specpath build main.py
+./.venv/Scripts/python.exe -m PyInstaller --clean --onedir --name MangaLibrary --specpath build main.py
 ./dist/MangaLibrary/MangaLibrary.exe
 ```
 
@@ -189,12 +143,11 @@ to replace the previous output. Add `--noconfirm` to skip that prompt.
 For a single executable with no console window:
 
 ```bash
-python -m PyInstaller --onefile --windowed --name MangaLibrary --specpath build main.py
+./.venv/Scripts/python.exe -m PyInstaller --clean --onefile --windowed --name MangaLibrary --specpath build main.py
 ./dist/MangaLibrary.exe
 ```
-
-Build on Windows to produce a Windows executable. The packaged application
-includes its Python runtime, so the recipient does not need Python installed.
+  
+The packaged application includes its Python runtime and required dependencies.
 
 ## Code layout
 
@@ -203,6 +156,7 @@ main.py                       # Entry point: starts the app's event loop
 manga_journal/
     __init__.py               # Marks the directory as a Python package
     ui.py                     # Library list, review panel, and add/edit form
+    theme.py                  # Dark palette, fonts, widget styles, and scrollbars
     library.py                # Validation, title/status filtering, and sorting
     database.py               # Resolves storage location and runs SQLite queries
 requirements/
@@ -212,14 +166,3 @@ tests/
     test_library.py            # Storage, validation, filtering, and atomic bulk deletion
     test_ui.py                 # Forms, multiple selection, draft protection, and controls
 ```
-
-Each Python package directory includes an `__init__.py` file.
-
-## Leave the virtual environment
-
-When finished:
-
-```bash
-deactivate
-```
-

@@ -1,5 +1,8 @@
 # Tkinter/ttk and sqlite3 come with the standard Windows Python installation.
 # They are not installed with pip.
 
+# Runtime dependency: modern ttk controls and the app's custom dark theme.
+ttkbootstrap==2.2.7
+
 # Build dependency: packages the desktop app as a Windows executable.
 pyinstaller

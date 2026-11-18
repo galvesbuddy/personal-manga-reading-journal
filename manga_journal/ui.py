@@ -2,9 +2,12 @@
 
 import sqlite3
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
+import ttkbootstrap as ttk
 
 from .library import MangaLibrary, STATUSES
+from .theme import PANEL_PADDING, READING_PADDING, THEME_NAME, apply_styles, attach_scrollbar, register_theme, text_options
 
 
 SORT_OPTIONS = {
@@ -14,18 +17,19 @@ SORT_OPTIONS = {
 }
 
 
-class MangaJournalApp(tk.Tk):
+class MangaJournalApp(ttk.App):
     def __init__(self, library: MangaLibrary) -> None:
-        super().__init__()
+        register_theme()
+        super().__init__(title="Manga Library", theme=THEME_NAME)
+        apply_styles(self)
         self.library = library
         self.selected_id: int | None = None
         self.selected_ids: tuple[int, ...] = ()
         self.editing_id: int | None = None
         self._mode = "view"
         self._form_baseline: dict[str, str] = {}
-        self.title("Manga Library")
-        self.geometry("1000x650")
-        self.minsize(820, 520)
+        self.geometry("1120x760")
+        self.minsize(960, 640)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -39,6 +43,8 @@ class MangaJournalApp(tk.Tk):
         self.sort_input = tk.StringVar(value="Title (A–Z)")
         self._restoring_filters = False
         self._active_filters = self._filter_values()
+        self.review_caption = tk.StringVar(value="YOUR REVIEW")
+        self.form_title = tk.StringVar(value="New manga")
         self.review_title = tk.StringVar(value="Select a manga")
         self.feedback = tk.StringVar(value="Select a manga to read your review, or add a new one.")
         self.count = tk.StringVar(value="0 manga")
@@ -50,82 +56,139 @@ class MangaJournalApp(tk.Tk):
         self.manga_list.focus_set()
 
     def _build_widgets(self) -> None:
-        content = ttk.Frame(self, padding=16)
+        content = ttk.Frame(self, style="Main.TFrame")
         content.grid(row=0, column=0, sticky="nsew")
-        content.columnconfigure(0, weight=3)
-        content.columnconfigure(1, weight=2)
-        content.rowconfigure(1, weight=1)
-        ttk.Label(content, text="Manga Library", font=("Segoe UI", 18, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 16)
+        content.columnconfigure(0, weight=1, minsize=440, uniform="panels")
+        content.columnconfigure(1, weight=0, minsize=1)
+        content.columnconfigure(2, weight=1, minsize=380, uniform="panels")
+        content.rowconfigure(0, weight=1)
+
+        listing = ttk.Frame(
+            content, padding=(PANEL_PADDING, 24, PANEL_PADDING, 16), style="Sidebar.TFrame"
         )
-        ttk.Button(content, text="New manga", command=self.start_new).grid(
-            row=0, column=1, sticky="e", pady=(0, 16)
+        listing.grid(row=0, column=0, sticky="nsew")
+        listing.columnconfigure(0, weight=1)
+        listing.rowconfigure(3, weight=1)
+        header = ttk.Frame(listing, style="Sidebar.TFrame")
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 24))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="READING JOURNAL", style="Accent.Sidebar.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
+        ttk.Label(header, text="Manga Library", style="Title.Sidebar.TLabel").grid(
+            row=1, column=0, sticky="w"
+        )
+        ttk.Button(header, text="New manga", command=self.start_new, bootstyle="primary").grid(
+            row=0, column=1, rowspan=2, sticky="e", padx=(16, 0)
         )
 
-        listing = ttk.Frame(content)
-        listing.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
-        listing.columnconfigure(0, weight=1)
-        listing.rowconfigure(2, weight=1)
         self._build_list_controls(listing)
-        selection_bar = ttk.Frame(listing)
-        selection_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        selection_bar = ttk.Frame(listing, style="Sidebar.TFrame")
+        selection_bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         selection_bar.columnconfigure(0, weight=1)
-        ttk.Label(selection_bar, textvariable=self.count).grid(row=0, column=0, sticky="w")
-        self.select_all_button = ttk.Button(selection_bar, text="Select all", command=self.select_all)
+        ttk.Label(selection_bar, textvariable=self.count, style="Muted.Sidebar.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.select_all_button = ttk.Button(
+            selection_bar, text="Select all", command=self.select_all, bootstyle="secondary outline"
+        )
         self.select_all_button.grid(row=0, column=1, sticky="e")
         self.manga_list = ttk.Treeview(
-            listing, columns=("title", "status", "rating", "chapter"), show="headings", selectmode="extended"
+            listing, columns=("title", "status", "rating", "chapter"),
+            show="headings", selectmode="extended", style="Library.Treeview",
         )
         for name, heading, width in (
-            ("title", "Title", 220),
-            ("status", "Status", 105),
-            ("rating", "Rating", 65),
-            ("chapter", "Chapter", 70),
+            ("title", "Title", 220), ("status", "Status", 108),
+            ("rating", "Rating", 70), ("chapter", "Chapter", 70),
         ):
-            self.manga_list.heading(name, text=heading)
-            self.manga_list.column(name, width=width, minwidth=60, stretch=(name == "title"))
-        self.manga_list.grid(row=2, column=0, sticky="nsew")
+            anchor = "w" if name in ("title", "status") else "center"
+            self.manga_list.heading(name, text=heading, anchor=anchor)
+            self.manga_list.column(
+                name, width=width, minwidth=70, stretch=(name == "title"), anchor=anchor
+            )
+        self.manga_list.grid(row=3, column=0, sticky="nsew")
         self.manga_list.bind("<<TreeviewSelect>>", self._on_manga_selected)
         self.manga_list.bind("<Control-a>", self.select_all)
         self.manga_list.bind("<Control-A>", self.select_all)
-        scrollbar = ttk.Scrollbar(listing, orient="vertical", command=self.manga_list.yview)
-        scrollbar.grid(row=2, column=1, sticky="ns")
-        self.manga_list.configure(yscrollcommand=scrollbar.set)
+        for event in ("<Button-1>", "<Double-Button-1>", "<Motion>"):
+            self.manga_list.bind(event, self._prevent_column_resize)
+        scrollbar = ttk.Scrollbar(
+            listing, orient="vertical", command=self.manga_list.yview, bootstyle="secondary"
+        )
+        scrollbar.grid(row=3, column=1, sticky="ns")
+        attach_scrollbar(self.manga_list, scrollbar)
+        ttk.Label(
+            listing, text="Ctrl+click: select multiple   ·   Ctrl+A: select all",
+            style="Muted.Sidebar.TLabel",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-        self.panel = ttk.Frame(content)
-        self.panel.grid(row=1, column=1, sticky="nsew")
+        ttk.Frame(content, width=1, style="Divider.TFrame").grid(row=0, column=1, sticky="ns")
+        self.panel = ttk.Frame(
+            content, padding=(READING_PADDING, 28, READING_PADDING, 24), style="Main.TFrame"
+        )
+        self.panel.grid(row=0, column=2, sticky="nsew")
         self.panel.columnconfigure(0, weight=1)
         self.panel.rowconfigure(0, weight=1)
         self._build_review_panel()
         self._build_form_panel()
         self.form.grid_remove()
-        ttk.Label(content, textvariable=self.feedback, wraplength=760).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(12, 0)
+        self.panel.bind("<Configure>", self._resize_panel_text)
+
+        footer = ttk.Frame(self, padding=(PANEL_PADDING, 10), style="Sidebar.TFrame")
+        footer.grid(row=1, column=0, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+        self.feedback_label = ttk.Label(
+            footer, textvariable=self.feedback, style="Muted.Sidebar.TLabel", wraplength=1000
         )
+        self.feedback_label.grid(row=0, column=0, sticky="w")
+        footer.bind("<Configure>", self._resize_feedback)
+
+    def _prevent_column_resize(self, event: tk.Event) -> str | None:
+        """Keep column dividers fixed while allowing normal row selection."""
+        if self.manga_list.identify_region(event.x, event.y) == "separator":
+            self.manga_list.configure(cursor="")
+            return "break"
+        return None
+
+    def _resize_panel_text(self, event: tk.Event) -> None:
+        width = max(180, event.width - 2 * READING_PADDING)
+        self.review_heading.configure(wraplength=width)
+        self.status_hint_label.configure(wraplength=width)
+
+    def _resize_feedback(self, event: tk.Event) -> None:
+        self.feedback_label.configure(wraplength=max(240, event.width - 2 * PANEL_PADDING))
 
     def _build_list_controls(self, listing: ttk.Frame) -> None:
-        controls = ttk.Frame(listing)
-        controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        controls = ttk.Frame(listing, style="Sidebar.TFrame")
+        controls.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 16))
         controls.columnconfigure((0, 1), weight=1)
-        ttk.Label(controls, text="Search title").grid(row=0, column=0, sticky="w")
-        search = ttk.Frame(controls)
-        search.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
-        search.columnconfigure(0, weight=1)
-        self.search_entry = ttk.Entry(search, textvariable=self.search_input)
-        self.search_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(search, text="Reset", command=self.reset_filters).grid(
-            row=0, column=1, padx=(8, 0)
+        ttk.Label(controls, text="Search title", style="Caption.Sidebar.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
-        ttk.Label(controls, text="Status").grid(row=2, column=0, sticky="w")
-        ttk.Label(controls, text="Sort by").grid(row=2, column=1, sticky="w", padx=(8, 0))
+        search = ttk.Frame(controls, style="Sidebar.TFrame")
+        search.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 16))
+        search.columnconfigure(0, weight=1)
+        self.search_entry = ttk.Entry(
+            search, textvariable=self.search_input, style="Sidebar.TEntry"
+        )
+        self.search_entry.grid(row=0, column=0, sticky="ew")
+        ttk.Button(search, text="Reset", command=self.reset_filters, bootstyle="secondary outline").grid(
+            row=0, column=1, padx=(10, 0)
+        )
+        ttk.Label(controls, text="Status", style="Caption.Sidebar.TLabel").grid(
+            row=2, column=0, sticky="w"
+        )
+        ttk.Label(controls, text="Sort by", style="Caption.Sidebar.TLabel").grid(
+            row=2, column=1, sticky="w", padx=(12, 0)
+        )
         ttk.Combobox(
             controls, textvariable=self.status_filter, values=("All", *STATUSES),
-            state="readonly", width=15,
-        ).grid(row=3, column=0, sticky="ew", pady=(4, 0))
+            state="readonly", width=15, style="Sidebar.TCombobox",
+        ).grid(row=3, column=0, sticky="ew", pady=(6, 0))
         ttk.Combobox(
             controls, textvariable=self.sort_input, values=tuple(SORT_OPTIONS),
-            state="readonly", width=20,
-        ).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(4, 0))
+            state="readonly", width=20, style="Sidebar.TCombobox",
+        ).grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=(6, 0))
 
     def _filter_values(self) -> tuple[str, str, str]:
         return self.search_input.get(), self.status_filter.get(), self.sort_input.get()
@@ -163,77 +226,121 @@ class MangaJournalApp(tk.Tk):
         return bool(self.search_input.get().strip() or self.status_filter.get() != "All")
 
     def _build_review_panel(self) -> None:
-        self.review_panel = ttk.LabelFrame(self.panel, text="Your review", padding=12)
+        self.review_panel = ttk.Frame(self.panel, style="Main.TFrame")
         self.review_panel.grid(row=0, column=0, sticky="nsew")
         self.review_panel.columnconfigure(0, weight=1)
-        self.review_panel.rowconfigure(1, weight=1)
+        self.review_panel.rowconfigure(3, weight=1)
         ttk.Label(
-            self.review_panel, textvariable=self.review_title,
-            font=("Segoe UI", 14, "bold"), wraplength=290,
+            self.review_panel, textvariable=self.review_caption, style="Caption.Main.TLabel"
         ).grid(row=0, column=0, sticky="w", pady=(0, 12))
+        self.review_heading = ttk.Label(
+            self.review_panel, textvariable=self.review_title,
+            style="Heading.Main.TLabel", wraplength=400,
+        )
+        self.review_heading.grid(row=1, column=0, sticky="w", pady=(0, 24))
+        ttk.Frame(self.review_panel, height=1, style="Divider.TFrame").grid(
+            row=2, column=0, sticky="ew", pady=(0, 24)
+        )
 
-        review_area = ttk.Frame(self.review_panel)
-        review_area.grid(row=1, column=0, sticky="nsew")
+        review_area = ttk.Frame(self.review_panel, style="Main.TFrame")
+        review_area.grid(row=3, column=0, sticky="nsew")
         review_area.columnconfigure(0, weight=1)
         review_area.rowconfigure(0, weight=1)
         self.review_display = tk.Text(
             review_area, height=10, width=28, wrap="word",
-            font=("Segoe UI", 10), state="disabled",
+            state="disabled", **text_options(),
         )
         self.review_display.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(review_area, orient="vertical", command=self.review_display.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.review_display.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(
+            review_area, orient="vertical", command=self.review_display.yview, bootstyle="secondary"
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(12, 0))
+        attach_scrollbar(self.review_display, scrollbar)
 
-        actions = ttk.Frame(self.review_panel)
-        actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
-        actions.columnconfigure((0, 1), weight=1)
-        self.edit_button = ttk.Button(actions, text="Edit", command=self.start_edit, state="disabled")
-        self.edit_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.delete_button = ttk.Button(actions, text="Delete selected", command=self.delete_manga, state="disabled")
-        self.delete_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        actions = ttk.Frame(self.review_panel, style="Main.TFrame")
+        actions.grid(row=4, column=0, sticky="ew", pady=(24, 0))
+        actions.columnconfigure(0, weight=1)
+        self.edit_button = ttk.Button(
+            actions, text="Edit", command=self.start_edit,
+            state="disabled", bootstyle="secondary outline",
+        )
+        self.edit_button.grid(row=0, column=0, sticky="w")
+        self.delete_button = ttk.Button(
+            actions, text="Delete selected", command=self.delete_manga,
+            state="disabled", bootstyle="danger outline",
+        )
+        self.delete_button.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _build_form_panel(self) -> None:
-        self.form = ttk.LabelFrame(self.panel, text="New manga", padding=12)
+        self.form = ttk.Frame(self.panel, style="Main.TFrame")
         self.form.grid(row=0, column=0, sticky="nsew")
         self.form.columnconfigure(0, weight=1)
-        self.form.rowconfigure(7, weight=1)
-
-        ttk.Label(self.form, text="Title (required)").grid(row=0, column=0, sticky="w")
-        self.title_entry = ttk.Entry(self.form, textvariable=self.title_input)
-        self.title_entry.grid(row=1, column=0, sticky="ew", pady=(4, 12))
-        ttk.Label(self.form, text="Status").grid(row=2, column=0, sticky="w")
+        self.form.rowconfigure(8, weight=1)
+        ttk.Label(self.form, textvariable=self.form_title, style="Heading.Main.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 24)
+        )
+        ttk.Label(self.form, text="Title (required)", style="Caption.Main.TLabel").grid(
+            row=1, column=0, sticky="w"
+        )
+        self.title_entry = ttk.Entry(
+            self.form, textvariable=self.title_input, style="Editor.TEntry"
+        )
+        self.title_entry.grid(row=2, column=0, sticky="ew", pady=(6, 16))
+        ttk.Label(self.form, text="Status", style="Caption.Main.TLabel").grid(
+            row=3, column=0, sticky="w"
+        )
         self.status_dropdown = ttk.Combobox(
-            self.form, textvariable=self.status_input, values=("Automatic", *STATUSES), state="readonly"
+            self.form, textvariable=self.status_input, values=("Automatic", *STATUSES),
+            state="readonly", style="Editor.TCombobox",
         )
-        self.status_dropdown.grid(row=3, column=0, sticky="ew", pady=(4, 4))
-        ttk.Label(self.form, textvariable=self.status_hint, wraplength=260).grid(
-            row=4, column=0, sticky="w", pady=(0, 12)
+        self.status_dropdown.grid(row=4, column=0, sticky="ew", pady=(6, 6))
+        self.status_hint_label = ttk.Label(
+            self.form, textvariable=self.status_hint, style="Muted.Main.TLabel", wraplength=380
         )
+        self.status_hint_label.grid(row=5, column=0, sticky="w", pady=(0, 16))
 
-        numbers = ttk.Frame(self.form)
-        numbers.grid(row=5, column=0, sticky="ew", pady=(0, 12))
+        numbers = ttk.Frame(self.form, style="Main.TFrame")
+        numbers.grid(row=6, column=0, sticky="ew", pady=(0, 16))
         numbers.columnconfigure((0, 1), weight=1)
-        ttk.Label(numbers, text="Rating (0–100, optional)").grid(row=0, column=0, sticky="w")
-        ttk.Label(numbers, text="Current chapter").grid(row=0, column=1, sticky="w", padx=(12, 0))
-        ttk.Entry(numbers, textvariable=self.rating_input, width=12).grid(
-            row=1, column=0, sticky="ew", pady=(4, 0)
+        ttk.Label(numbers, text="Rating (0–100, optional)", style="Caption.Main.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
-        ttk.Entry(numbers, textvariable=self.chapter_input, width=12).grid(
-            row=1, column=1, sticky="ew", padx=(12, 0), pady=(4, 0)
+        ttk.Label(numbers, text="Current chapter", style="Caption.Main.TLabel").grid(
+            row=0, column=1, sticky="w", padx=(16, 0)
         )
-        ttk.Label(self.form, text="Thoughts / review (optional)").grid(row=6, column=0, sticky="w")
-        self.review_input = tk.Text(self.form, height=7, width=28, wrap="word", font=("Segoe UI", 10))
-        self.review_input.grid(row=7, column=0, sticky="nsew", pady=(4, 12))
-        actions = ttk.Frame(self.form)
-        actions.grid(row=8, column=0, sticky="ew")
-        actions.columnconfigure((0, 1), weight=1)
-        ttk.Button(actions, text="Save", command=self.save_manga).grid(
-            row=0, column=0, sticky="ew", padx=(0, 6)
+        ttk.Entry(numbers, textvariable=self.rating_input, width=12, style="Editor.TEntry").grid(
+            row=1, column=0, sticky="ew", pady=(6, 0)
         )
-        ttk.Button(actions, text="Cancel", command=self.cancel_form).grid(
-            row=0, column=1, sticky="ew", padx=(6, 0)
+        ttk.Entry(numbers, textvariable=self.chapter_input, width=12, style="Editor.TEntry").grid(
+            row=1, column=1, sticky="ew", padx=(16, 0), pady=(6, 0)
         )
+        ttk.Label(self.form, text="Thoughts / review", style="Caption.Main.TLabel").grid(
+            row=7, column=0, sticky="w"
+        )
+        edit_area = ttk.Frame(self.form, style="Main.TFrame")
+        edit_area.grid(row=8, column=0, sticky="nsew", pady=(6, 20))
+        edit_area.columnconfigure(0, weight=1)
+        edit_area.rowconfigure(0, weight=1)
+        self.review_input = tk.Text(
+            edit_area, height=5, width=28, wrap="word", **text_options(editable=True)
+        )
+        self.review_input.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(
+            edit_area, orient="vertical", command=self.review_input.yview, bootstyle="secondary"
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        attach_scrollbar(self.review_input, scrollbar)
+        actions = ttk.Frame(self.form, style="Main.TFrame")
+        actions.grid(row=9, column=0, sticky="ew")
+        actions.columnconfigure(0, weight=1)
+        self.save_button = ttk.Button(
+            actions, text="Save", command=self.save_manga, bootstyle="primary"
+        )
+        self.save_button.grid(row=0, column=0, sticky="w")
+        self.cancel_button = ttk.Button(
+            actions, text="Cancel", command=self.cancel_form, bootstyle="secondary outline"
+        )
+        self.cancel_button.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def refresh_manga(
         self, preferred_id: int | None = None, *, select_first: bool = False
@@ -286,7 +393,7 @@ class MangaJournalApp(tk.Tk):
         self._form_baseline = {}
         self.selected_id = entry["id"] if entry is not None else None
         self.selected_ids = (self.selected_id,) if self.selected_id is not None else ()
-        self.review_panel.configure(text="Your review")
+        self.review_caption.set("YOUR REVIEW")
         if entry is None:
             if self.manga_list.get_children():
                 self.review_title.set("Select a manga")
@@ -319,7 +426,7 @@ class MangaJournalApp(tk.Tk):
         self._form_baseline = {}
         self.selected_id = None
         self.selected_ids = manga_ids
-        self.review_panel.configure(text="Selection")
+        self.review_caption.set("SELECTION")
         self.review_title.set(f"{len(manga_ids)} manga selected")
         self._set_review_text(
             "Use Delete selected to remove these manga and their reviews.\n\n"
@@ -386,7 +493,7 @@ class MangaJournalApp(tk.Tk):
     def _show_form(self, entry: sqlite3.Row | None) -> None:
         self.editing_id = entry["id"] if entry is not None else None
         self._mode = "edit" if entry is not None else "new"
-        self.form.configure(text="Edit manga" if entry is not None else "New manga")
+        self.form_title.set("Edit manga" if entry is not None else "New manga")
         self.title_input.set(entry["title"] if entry is not None else "")
         self.status_input.set(entry["status"] if entry is not None else "Automatic")
         self.rating_input.set(
