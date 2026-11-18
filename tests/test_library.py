@@ -103,6 +103,71 @@ class MangaLibraryTests(unittest.TestCase):
                 default_database_path(), Path(self.temp.name) / "MangaLibrary" / "library.sqlite3"
             )
 
+    def test_get_manga_returns_the_requested_entry(self) -> None:
+        first_id = self.library.add_manga(title="Same title", review="First review")
+        second_id = self.library.add_manga(title="Same title", review="Second review")
+        self.assertEqual(self.library.get_manga(first_id)["review"], "First review")
+        self.assertEqual(self.library.get_manga(second_id)["review"], "Second review")
+
+    def test_update_preserves_id_and_survives_reopening(self) -> None:
+        manga_id = self.library.add_manga(title="Original", rating="90", review="Old review")
+        other_id = self.library.add_manga(title="Other", review="Leave this alone")
+        self.library.update_manga(
+            manga_id, title="  Reader's revised title  ", status="Dropped",
+            rating="0", current_chapter="12.5", review="Updated review.\nSecond line.",
+        )
+        reopened = MangaLibrary(MangaDatabase(self.path))
+        self.assertEqual(len(reopened.list_manga()), 2)
+        self.assertEqual(dict(reopened.get_manga(manga_id)), {
+            "id": manga_id, "title": "Reader's revised title", "status": "Dropped",
+            "rating": 0, "current_chapter": 12.5, "review": "Updated review.\nSecond line.",
+        })
+        self.assertEqual(reopened.get_manga(other_id)["review"], "Leave this alone")
+
+    def test_update_can_clear_optional_fields(self) -> None:
+        manga_id = self.library.add_manga(title="Example", rating="100", review="Old review")
+        self.library.update_manga(manga_id, title="Example", rating="", review="")
+        entry = self.library.get_manga(manga_id)
+        self.assertIsNone(entry["rating"])
+        self.assertEqual(entry["review"], "")
+
+    def test_editing_chapter_preserves_existing_status_when_omitted(self) -> None:
+        for status in ("Not Started", "Reading", "Completed", "Dropped"):
+            with self.subTest(status=status):
+                manga_id = self.library.add_manga(title=status, status=status)
+                self.library.update_manga(manga_id, title=status, current_chapter="25.5")
+                self.assertEqual(self.library.get_manga(manga_id)["status"], status)
+
+    def test_invalid_update_leaves_saved_entry_unchanged(self) -> None:
+        manga_id = self.library.add_manga(title="Original", rating="85", review="Keep this")
+        before = dict(self.library.get_manga(manga_id))
+        for values in ({"title": "  "}, {"rating": "101"}, {"current_chapter": "-1"}, {"status": "Unknown"}):
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    self.library.update_manga(manga_id, **{"title": "Changed", **values})
+                self.assertEqual(dict(self.library.get_manga(manga_id)), before)
+
+    def test_delete_survives_reopening_and_only_removes_target(self) -> None:
+        manga_id = self.library.add_manga(title="Same title", review="Delete this")
+        other_id = self.library.add_manga(title="Same title", review="Keep this")
+        self.library.delete_manga(manga_id)
+        reopened = MangaLibrary(MangaDatabase(self.path))
+        self.assertEqual(len(reopened.list_manga()), 1)
+        self.assertEqual(reopened.get_manga(other_id)["review"], "Keep this")
+        with self.assertRaises(ValueError):
+            reopened.get_manga(manga_id)
+
+    def test_missing_id_operations_do_not_affect_other_entries(self) -> None:
+        manga_id = self.library.add_manga(title="Keep this")
+        missing_id = manga_id + 100
+        with self.assertRaises(ValueError):
+            self.library.get_manga(missing_id)
+        with self.assertRaises(ValueError):
+            self.library.update_manga(missing_id, title="Cannot insert through update")
+        with self.assertRaises(ValueError):
+            self.library.delete_manga(missing_id)
+        self.assertEqual([entry["id"] for entry in self.library.list_manga()], [manga_id])
+
 
 if __name__ == "__main__":
     unittest.main()

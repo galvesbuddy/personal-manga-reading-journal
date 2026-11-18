@@ -1,9 +1,10 @@
 # Personal Manga Reading Journal
 
 A local desktop manga journal built with Python, Tkinter, and SQLite. The
-current version lets you add manga and displays your saved library across
-application restarts. The interface is a basic functional version; visual
-styling, editing, deletion, search, filtering, and sorting are future steps.
+current version lets you add manga, read saved reviews, edit entries, and
+delete entries. Your library persists across application restarts. The
+interface is a basic functional version; visual styling, search, filtering,
+and sorting are future steps.
 
 ## Setup (Git Bash on Windows)
 
@@ -45,21 +46,35 @@ With the virtual environment active, run:
 python main.py
 ```
 
-A window titled **Manga Library** opens with a saved-manga list and an entry
-form. Enter a title and click **Add manga**. Titles are trimmed and cannot be
-blank. Other fields are optional:
+A window titled **Manga Library** opens with the saved-manga list on the left
+and the selected manga's title and review on the right. The first manga is
+selected when a saved library opens. All actions stay in the same window:
+
+- Click a manga to read its review. Entries without a review show "No review yet."
+- Click **New manga** for an empty form, then **Save** to add it.
+- Click **Edit** to load the selected manga's existing fields into the form.
+  **Save** updates that entry; **Cancel** returns to the review without saving.
+- Click **Delete**, then confirm, to remove the selected manga and its review.
+
+New and Edit temporarily replace the review panel with the form. Save returns
+to the saved entry's review. Switching manga, starting another form, or closing
+the window asks before discarding a changed draft. Cancel explicitly discards
+the current draft. Edit and Delete are disabled for an empty library.
+
+Titles are trimmed and cannot be blank. Other fields are optional when adding:
 
 - **Status:** Automatic saves Not Started at chapter 0, or Reading above 0.
-  An explicit selection always takes priority.
+  An explicit selection always takes priority. Editing starts with the saved
+  status; changing the chapter does not change that status automatically.
 - **Rating:** a whole number from 0 to 100. Leaving it blank means Unrated;
   a rating of 0 is a valid score.
 - **Current chapter:** a finite, nonnegative number, including decimals such
   as 10.5. Leaving it blank means 0.
 - **Thoughts / review:** optional free-form text saved with the entry.
 
-Successful additions clear the form and select the saved entry in the list.
-The list currently displays titles alphabetically. Selecting a row does not
-yet open an editor or review viewer.
+The list displays titles alphabetically and keeps the saved entry selected
+after adding or editing. Database IDs identify entries, so editing a title
+does not create a duplicate and entries with the same title remain separate.
 
 ## Local storage
 
@@ -77,22 +92,32 @@ and source code. Rebuilding or moving the executable does not move the library.
 The single `manga` table contains `id`, `title`, `status`, `rating`,
 `current_chapter`, and `review`. SQL constraints back up input validation, and
 parameterized queries keep user text separate from SQL instructions.
+This step keeps the existing table structure, so previously saved entries
+and reviews remain available without a schema migration.
 
-## Verify the first workflow
+## Verify the workflows
 
-Add a manga with chapter 10.5 and no explicit status. Confirm the list shows
-Reading, then close and reopen the app to confirm the entry remains. Add one
-manga with a rating of 0 and another with the rating blank; they should display
-0 and Unrated respectively. Invalid entries should show an explanation and
-leave the form intact.
+Use **New manga** to add an entry with chapter 10.5, a review, and Automatic
+status. Confirm Reading appears in the list and the saved review appears on
+the right. Close and reopen the app to verify both remain. Ratings of 0 and
+blank should display as 0 and Unrated respectively.
 
-Run the automated storage and validation checks with:
+Edit an entry's title and review, save, then restart to verify the changes
+without an extra row. Try another edit and Cancel; the original values should
+remain. Invalid input should show an explanation and leave the draft intact.
+Cancel a deletion to verify the entry stays, then confirm deletion and restart
+to verify it is gone. Switching away from an unsaved draft should let you keep
+working or confirm discarding it.
+
+Run the automated storage, validation, and UI workflow checks with:
 
 ```bash
 python -m unittest discover -v
 ```
 
-Tests use temporary databases and do not modify your personal library.
+Tests use temporary databases and do not modify your personal library. UI
+tests create hidden Tkinter windows and require a graphical session; they are
+skipped when no display is available.
 
 ## Build a Windows executable
 
@@ -125,14 +150,15 @@ includes its Python runtime, so the recipient does not need Python installed.
 main.py                       # Entry point: starts the app's event loop
 manga_journal/
     __init__.py               # Marks the directory as a Python package
-    ui.py                     # Defines the Tkinter window
-    library.py                # Validates inputs and applies status defaults
+    ui.py                     # Library list, review panel, and add/edit form
+    library.py                # Shared validation and application operations
     database.py               # Resolves storage location and runs SQLite queries
 requirements/
     requirements.txt          # Third-party dependency list
 tests/
     __init__.py
     test_library.py            # Validation, persistence, and database constraints
+    test_ui.py                 # Review, add/edit/cancel, navigation, and deletion
 ```
 
 Each Python package directory includes an `__init__.py` file.

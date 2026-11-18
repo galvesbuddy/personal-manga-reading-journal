@@ -68,3 +68,39 @@ class MangaDatabase:
                 ORDER BY title COLLATE NOCASE, id
                 """
             ).fetchall()
+
+    def get_manga(self, manga_id: int) -> sqlite3.Row | None:
+        with closing(self._connect()) as connection:
+            return connection.execute(
+                """
+                SELECT id, title, status, rating, current_chapter, review
+                FROM manga WHERE id = ?
+                """,
+                (manga_id,),
+            ).fetchone()
+
+    def update_manga(
+        self,
+        manga_id: int,
+        *,
+        title: str,
+        status: str,
+        rating: int | None,
+        current_chapter: float,
+        review: str,
+    ) -> bool:
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE manga
+                SET title = ?, status = ?, rating = ?, current_chapter = ?, review = ?
+                WHERE id = ?
+                """,
+                (title, status, rating, current_chapter, review, manga_id),
+            )
+            return cursor.rowcount == 1
+
+    def delete_manga(self, manga_id: int) -> bool:
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute("DELETE FROM manga WHERE id = ?", (manga_id,))
+            return cursor.rowcount == 1
