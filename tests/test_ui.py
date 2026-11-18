@@ -131,6 +131,7 @@ class MangaUITests(unittest.TestCase):
 
     def test_delete_requires_confirmation_and_handles_empty_library(self) -> None:
         self.app.delete_manga()
+        self.assertEqual(self.confirm.call_args.args[1], 'Delete "First"?')
         self.assertEqual(len(self.library.list_manga()), 2)
         self.confirm.return_value = True
         self.app.delete_manga()
@@ -318,6 +319,136 @@ class MangaUITests(unittest.TestCase):
         self.assertEqual(self.app.search_input.get(), "")
         self.assertEqual(self.app.manga_list.get_children(), before)
         self.assertEqual(self.app.selected_id, self.first_id)
+
+    def select_many(self, *manga_ids: int) -> None:
+        self.app.manga_list.selection_set(tuple(str(manga_id) for manga_id in manga_ids))
+        self.app.update()
+
+    def test_multiple_selection_shows_count_and_disables_edit(self) -> None:
+        self.select_many(self.first_id, self.second_id)
+        self.assertIsNone(self.app.selected_id)
+        self.assertEqual(set(self.app.selected_ids), {self.first_id, self.second_id})
+        self.assertEqual(self.app.review_title.get(), "2 manga selected")
+        self.assertTrue(self.app.edit_button.instate(["disabled"]))
+        self.assertFalse(self.app.delete_button.instate(["disabled"]))
+        self.app.start_edit()
+        self.assertEqual(self.app._mode, "view")
+        self.error.assert_not_called()
+
+    def test_select_all_and_bulk_delete_only_affect_displayed_matches(self) -> None:
+        third = self.library.add_manga(title="Third", review="Third review")
+        self.app.status_filter.set("Not Started")
+        self.app.select_all()
+        self.app.update()
+        self.assertEqual(set(self.app.selected_ids), {self.second_id, third})
+        self.confirm.return_value = True
+        self.app.delete_manga()
+        self.app.update()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.confirm.call_args.args[1], "Delete 2 manga?")
+        self.assertEqual([entry["id"] for entry in self.library.list_manga()], [self.first_id])
+        self.assertEqual(self.app.review_title.get(), "No matching manga")
+        self.assertTrue(self.app.select_all_button.instate(["disabled"]))
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.error.assert_not_called()
+
+    def test_cancelling_bulk_delete_keeps_entries_and_selection(self) -> None:
+        self.app.select_all()
+        self.app.update()
+        before = [dict(entry) for entry in self.library.list_manga()]
+        self.app.delete_manga()
+        self.confirm.assert_called_once()
+        self.assertEqual([dict(entry) for entry in self.library.list_manga()], before)
+        self.assertEqual(set(self.app.selected_ids), {self.first_id, self.second_id})
+        self.error.assert_not_called()
+
+    def test_bulk_delete_entire_library_clears_selection_and_allows_new_entries(self) -> None:
+        self.app.select_all()
+        self.app.update()
+        self.confirm.return_value = True
+        self.app.delete_manga()
+        self.app.update()
+        self.assertEqual(self.library.list_manga(), [])
+        self.assertEqual(self.app.selected_ids, ())
+        self.assertIsNone(self.app.selected_id)
+        self.assertTrue(self.app.edit_button.instate(["disabled"]))
+        self.assertTrue(self.app.delete_button.instate(["disabled"]))
+        self.assertTrue(self.app.select_all_button.instate(["disabled"]))
+        self.app.start_new()
+        self.app.title_input.set("After clearing")
+        self.app.save_manga()
+        self.app.update()
+        self.assertEqual(len(self.library.list_manga()), 1)
+        self.assertEqual(self.app.review_title.get(), "After clearing")
+        self.assertFalse(self.app.select_all_button.instate(["disabled"]))
+        self.error.assert_not_called()
+
+    def test_select_all_preserves_draft_if_discard_is_declined(self) -> None:
+        self.app.start_edit()
+        self.app.review_input.insert("end", " Draft")
+        self.app.select_all()
+        self.app.update()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.app.selected_ids, (self.first_id,))
+        self.assertEqual(self.app.manga_list.selection(), (str(self.first_id),))
+        self.assertEqual(self.app._mode, "edit")
+        self.assertTrue(self.app.review_input.get("1.0", "end-1c").endswith(" Draft"))
+        self.confirm.return_value = True
+        self.app.select_all()
+        self.app.update()
+        self.assertEqual(self.app.review_title.get(), "2 manga selected")
+        self.assertEqual(self.app._mode, "view")
+        self.assertEqual(self.library.get_manga(self.first_id)["review"], "First review.\nSecond line.")
+        self.error.assert_not_called()
+
+    def test_sort_preserves_multiple_selection_and_filter_drops_hidden_ids(self) -> None:
+        self.select_many(self.first_id, self.second_id)
+        self.app.sort_input.set("Rating: high to low")
+        self.app.update()
+        self.assertEqual(set(self.app.selected_ids), {self.first_id, self.second_id})
+        self.app.status_filter.set("Dropped")
+        self.app.update()
+        self.assertEqual(self.app.selected_ids, (self.first_id,))
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.assertFalse(self.app.edit_button.instate(["disabled"]))
+        self.app.reset_filters()
+        self.app.select_all()
+        self.app.update()
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.app.selected_ids, (self.first_id,))
+        self.error.assert_not_called()
+
+    def test_cancel_new_restores_multiple_selection(self) -> None:
+        self.select_many(self.first_id, self.second_id)
+        self.app.start_new()
+        self.app.title_input.set("Cancelled")
+        self.app.cancel_form()
+        self.app.update()
+        self.assertEqual(set(self.app.selected_ids), {self.first_id, self.second_id})
+        self.assertEqual(self.app.review_title.get(), "2 manga selected")
+        self.assertEqual(len(self.library.list_manga()), 2)
+        self.error.assert_not_called()
+
+    def test_deselecting_all_shows_selection_prompt_and_disables_delete(self) -> None:
+        self.app.manga_list.selection_remove(*self.app.manga_list.selection())
+        self.app.update()
+        self.assertEqual(self.app.selected_ids, ())
+        self.assertTrue(self.app.edit_button.instate(["disabled"]))
+        self.assertTrue(self.app.delete_button.instate(["disabled"]))
+        self.assertIn("Select a manga from the list", self.displayed_review())
+        self.assertFalse(self.app.select_all_button.instate(["disabled"]))
+        self.error.assert_not_called()
+
+    def test_failed_selection_read_restores_previous_selection(self) -> None:
+        with patch.object(self.library, "get_manga", side_effect=sqlite3.OperationalError("Test read failure")):
+            self.select(self.second_id)
+        self.error.assert_called_once()
+        self.assertEqual(self.app.selected_ids, (self.first_id,))
+        self.assertEqual(self.app.manga_list.selection(), (str(self.first_id),))
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
 
 
 if __name__ == "__main__":

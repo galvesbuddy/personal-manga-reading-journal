@@ -100,7 +100,15 @@ class MangaDatabase:
             )
             return cursor.rowcount == 1
 
-    def delete_manga(self, manga_id: int) -> bool:
+    def delete_manga_many(self, manga_ids: list[int]) -> int:
+        manga_ids = list(dict.fromkeys(manga_ids))
+        if not manga_ids:
+            return 0
         with closing(self._connect()) as connection, connection:
-            cursor = connection.execute("DELETE FROM manga WHERE id = ?", (manga_id,))
-            return cursor.rowcount == 1
+            cursor = connection.executemany(
+                "DELETE FROM manga WHERE id = ?", [(manga_id,) for manga_id in manga_ids]
+            )
+            if cursor.rowcount != len(manga_ids):
+                # Raising inside the transaction rolls back every deletion in this batch.
+                raise ValueError("Some selected manga no longer exist. No manga were deleted.")
+            return cursor.rowcount

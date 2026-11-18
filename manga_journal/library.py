@@ -90,9 +90,8 @@ class MangaLibrary:
         if not updated:
             raise ValueError("This manga is no longer in your library.")
 
-    def delete_manga(self, manga_id: int) -> None:
-        if not self.database.delete_manga(manga_id):
-            raise ValueError("This manga is no longer in your library.")
+    def delete_manga_many(self, manga_ids: list[int]) -> int:
+        return self.database.delete_manga_many(manga_ids)
 
     def _validate_fields(
         self,

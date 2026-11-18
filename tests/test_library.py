@@ -150,7 +150,7 @@ class MangaLibraryTests(unittest.TestCase):
     def test_delete_survives_reopening_and_only_removes_target(self) -> None:
         manga_id = self.library.add_manga(title="Same title", review="Delete this")
         other_id = self.library.add_manga(title="Same title", review="Keep this")
-        self.library.delete_manga(manga_id)
+        self.assertEqual(self.library.delete_manga_many([manga_id]), 1)
         reopened = MangaLibrary(MangaDatabase(self.path))
         self.assertEqual(len(reopened.list_manga()), 1)
         self.assertEqual(reopened.get_manga(other_id)["review"], "Keep this")
@@ -165,7 +165,7 @@ class MangaLibraryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.library.update_manga(missing_id, title="Cannot insert through update")
         with self.assertRaises(ValueError):
-            self.library.delete_manga(missing_id)
+            self.library.delete_manga_many([missing_id])
         self.assertEqual([entry["id"] for entry in self.library.list_manga()], [manga_id])
 
     def test_search_matches_partial_titles_ignoring_unicode_case(self) -> None:
@@ -220,6 +220,46 @@ class MangaLibraryTests(unittest.TestCase):
         self.library.list_manga(search="saved", status="Not Started", sort="rating_desc")
         self.library.list_manga(sort="rating_asc")
         self.assertEqual([dict(entry) for entry in self.library.list_manga()], before)
+
+    def test_bulk_delete_removes_selected_ids_and_persists(self) -> None:
+        first = self.library.add_manga(title="Same title", review="First review")
+        second = self.library.add_manga(title="Same title", review="Second review")
+        keep = self.library.add_manga(title="Same title", review="Keep this review")
+        self.assertEqual(self.library.delete_manga_many([first, second]), 2)
+        reopened = MangaLibrary(MangaDatabase(self.path))
+        self.assertEqual([entry["id"] for entry in reopened.list_manga()], [keep])
+        self.assertEqual(reopened.get_manga(keep)["review"], "Keep this review")
+
+    def test_empty_and_duplicate_bulk_selections_do_not_delete_extra_entries(self) -> None:
+        remove = self.library.add_manga(title="Remove")
+        keep = self.library.add_manga(title="Keep")
+        self.assertEqual(self.library.delete_manga_many([]), 0)
+        self.assertEqual(len(self.library.list_manga()), 2)
+        self.assertEqual(self.library.delete_manga_many([remove, remove]), 1)
+        self.assertEqual([entry["id"] for entry in self.library.list_manga()], [keep])
+
+    def test_bulk_delete_rolls_back_if_an_id_is_missing(self) -> None:
+        manga_id = self.library.add_manga(title="Keep", review="Keep this too")
+        with self.assertRaises(ValueError):
+            self.library.delete_manga_many([manga_id, manga_id + 100])
+        self.assertEqual(self.library.get_manga(manga_id)["review"], "Keep this too")
+
+    def test_bulk_delete_rolls_back_on_database_error(self) -> None:
+        first = self.library.add_manga(title="First", review="First review")
+        blocked = self.library.add_manga(title="Blocked", review="Blocked review")
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.execute(
+                """
+                CREATE TRIGGER block_test_deletion BEFORE DELETE ON manga
+                WHEN OLD.title = 'Blocked'
+                BEGIN SELECT RAISE(ABORT, 'Test deletion failure'); END
+                """
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.library.delete_manga_many([first, blocked])
+        reopened = MangaLibrary(MangaDatabase(self.path))
+        self.assertEqual(reopened.get_manga(first)["review"], "First review")
+        self.assertEqual(reopened.get_manga(blocked)["review"], "Blocked review")
 
 
 if __name__ == "__main__":

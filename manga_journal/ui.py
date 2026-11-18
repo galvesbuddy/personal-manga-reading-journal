@@ -19,6 +19,7 @@ class MangaJournalApp(tk.Tk):
         super().__init__()
         self.library = library
         self.selected_id: int | None = None
+        self.selected_ids: tuple[int, ...] = ()
         self.editing_id: int | None = None
         self._mode = "view"
         self._form_baseline: dict[str, str] = {}
@@ -66,9 +67,14 @@ class MangaJournalApp(tk.Tk):
         listing.columnconfigure(0, weight=1)
         listing.rowconfigure(2, weight=1)
         self._build_list_controls(listing)
-        ttk.Label(listing, textvariable=self.count).grid(row=1, column=0, sticky="w", pady=(0, 8))
+        selection_bar = ttk.Frame(listing)
+        selection_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        selection_bar.columnconfigure(0, weight=1)
+        ttk.Label(selection_bar, textvariable=self.count).grid(row=0, column=0, sticky="w")
+        self.select_all_button = ttk.Button(selection_bar, text="Select all", command=self.select_all)
+        self.select_all_button.grid(row=0, column=1, sticky="e")
         self.manga_list = ttk.Treeview(
-            listing, columns=("title", "status", "rating", "chapter"), show="headings", selectmode="browse"
+            listing, columns=("title", "status", "rating", "chapter"), show="headings", selectmode="extended"
         )
         for name, heading, width in (
             ("title", "Title", 220),
@@ -80,6 +86,8 @@ class MangaJournalApp(tk.Tk):
             self.manga_list.column(name, width=width, minwidth=60, stretch=(name == "title"))
         self.manga_list.grid(row=2, column=0, sticky="nsew")
         self.manga_list.bind("<<TreeviewSelect>>", self._on_manga_selected)
+        self.manga_list.bind("<Control-a>", self.select_all)
+        self.manga_list.bind("<Control-A>", self.select_all)
         scrollbar = ttk.Scrollbar(listing, orient="vertical", command=self.manga_list.yview)
         scrollbar.grid(row=2, column=1, sticky="ns")
         self.manga_list.configure(yscrollcommand=scrollbar.set)
@@ -182,7 +190,7 @@ class MangaJournalApp(tk.Tk):
         actions.columnconfigure((0, 1), weight=1)
         self.edit_button = ttk.Button(actions, text="Edit", command=self.start_edit, state="disabled")
         self.edit_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.delete_button = ttk.Button(actions, text="Delete", command=self.delete_manga, state="disabled")
+        self.delete_button = ttk.Button(actions, text="Delete selected", command=self.delete_manga, state="disabled")
         self.delete_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
     def _build_form_panel(self) -> None:
@@ -253,15 +261,23 @@ class MangaJournalApp(tk.Tk):
         suffix = "matching manga" if self._has_filters() else "manga"
         self.count.set(f"{len(manga)} {suffix}")
         entries = {entry["id"]: entry for entry in manga}
-        target = preferred_id if preferred_id is not None else self.selected_id
-        selected = None if select_first else entries.get(target)
-        if selected is None and manga:
-            selected = manga[0]
-        self._show_review(selected)
-        if self.selected_id is not None:
-            self.manga_list.selection_set(str(self.selected_id))
-            self.manga_list.focus(str(self.selected_id))
-            self.manga_list.see(str(self.selected_id))
+        if select_first:
+            selection = ()
+        elif preferred_id is not None and preferred_id in entries:
+            selection = (preferred_id,)
+        else:
+            selection = tuple(entry["id"] for entry in manga if entry["id"] in self.selected_ids)
+        if not selection and manga:
+            selection = (manga[0]["id"],)
+        if len(selection) > 1:
+            self._show_multiple_selection(selection)
+        else:
+            self._show_review(entries[selection[0]] if selection else None)
+        self.select_all_button.configure(state="normal" if manga else "disabled")
+        if selection:
+            self.manga_list.selection_set(tuple(str(manga_id) for manga_id in selection))
+            self.manga_list.focus(str(selection[0]))
+            self.manga_list.see(str(selection[0]))
         return True
 
     def _show_review(self, entry: sqlite3.Row | None) -> None:
@@ -269,44 +285,82 @@ class MangaJournalApp(tk.Tk):
         self.editing_id = None
         self._form_baseline = {}
         self.selected_id = entry["id"] if entry is not None else None
-        self.review_title.set(
-            entry["title"] if entry is not None
-            else "No matching manga" if self._has_filters() else "Select a manga"
-        )
+        self.selected_ids = (self.selected_id,) if self.selected_id is not None else ()
+        self.review_panel.configure(text="Your review")
         if entry is None:
-            text = (
-                "Try another search or status, or use Reset to show the whole library."
-                if self._has_filters() else "Use New manga to add your first entry."
-            )
+            if self.manga_list.get_children():
+                self.review_title.set("Select a manga")
+                text = "Select a manga from the list to read your review."
+            elif self._has_filters():
+                self.review_title.set("No matching manga")
+                text = "Try another search or status, or use Reset to show the whole library."
+            else:
+                self.review_title.set("Select a manga")
+                text = "Use New manga to add your first entry."
         else:
+            self.review_title.set(entry["title"])
             text = entry["review"] or "No review yet."
-        self.review_display.configure(state="normal")
-        self.review_display.delete("1.0", "end")
-        self.review_display.insert("1.0", text)
-        self.review_display.configure(state="disabled")
+        self._set_review_text(text)
         self.form.grid_remove()
         self.review_panel.grid()
         state = "normal" if entry is not None else "disabled"
         self.edit_button.configure(state=state)
         self.delete_button.configure(state=state)
 
+    def _set_review_text(self, text: str) -> None:
+        self.review_display.configure(state="normal")
+        self.review_display.delete("1.0", "end")
+        self.review_display.insert("1.0", text)
+        self.review_display.configure(state="disabled")
+
+    def _show_multiple_selection(self, manga_ids: tuple[int, ...]) -> None:
+        self._mode = "view"
+        self.editing_id = None
+        self._form_baseline = {}
+        self.selected_id = None
+        self.selected_ids = manga_ids
+        self.review_panel.configure(text="Selection")
+        self.review_title.set(f"{len(manga_ids)} manga selected")
+        self._set_review_text(
+            "Use Delete selected to remove these manga and their reviews.\n\n"
+            "Select one manga to read or edit its review."
+        )
+        self.form.grid_remove()
+        self.review_panel.grid()
+        self.edit_button.configure(state="disabled")
+        self.delete_button.configure(state="normal")
+
+    def select_all(self, event: tk.Event | None = None) -> str:
+        self.manga_list.selection_set(self.manga_list.get_children())
+        self.manga_list.focus_set()
+        return "break"
+
+    def _restore_selection(self) -> None:
+        previous = tuple(
+            str(manga_id) for manga_id in self.selected_ids if self.manga_list.exists(str(manga_id))
+        )
+        self.manga_list.selection_set(previous)
+
     def _on_manga_selected(self, event: tk.Event | None = None) -> None:
-        selection = self.manga_list.selection()
-        if not selection:
-            return
-        manga_id = int(selection[0])
-        if manga_id == self.selected_id:
+        selection = tuple(int(item) for item in self.manga_list.selection())
+        if set(selection) == set(self.selected_ids):
             return
         if not self._confirm_discard():
-            if self.selected_id is not None and self.manga_list.exists(str(self.selected_id)):
-                self.manga_list.selection_set(str(self.selected_id))
-            else:
-                self.manga_list.selection_remove(*selection)
+            self._restore_selection()
+            return
+        if not selection:
+            self._show_review(None)
+            self.feedback.set("")
+            return
+        if len(selection) > 1:
+            self._show_multiple_selection(selection)
+            self.feedback.set("")
             return
         try:
-            entry = self.library.get_manga(manga_id)
+            entry = self.library.get_manga(selection[0])
         except (ValueError, sqlite3.Error) as error:
             messagebox.showerror("Cannot load manga", str(error), parent=self)
+            self._restore_selection()
             return
         self._show_review(entry)
         self.feedback.set("")
@@ -403,19 +457,22 @@ class MangaJournalApp(tk.Tk):
         self.manga_list.focus_set()
 
     def delete_manga(self) -> None:
-        if self.selected_id is None:
+        if not self.selected_ids or self._mode != "view":
             return
+        manga_ids = list(self.selected_ids)
         try:
-            entry = self.library.get_manga(self.selected_id)
-            if not messagebox.askyesno(
-                "Delete manga?", f'Delete "{entry["title"]}" and its review?', parent=self
-            ):
+            if len(manga_ids) == 1:
+                entry = self.library.get_manga(manga_ids[0])
+                prompt = f'Delete "{entry["title"]}"?'
+            else:
+                prompt = f"Delete {len(manga_ids)} manga?"
+            if not messagebox.askyesno("Delete selected manga?", prompt, parent=self):
                 return
-            self.library.delete_manga(self.selected_id)
+            deleted = self.library.delete_manga_many(manga_ids)
         except (ValueError, sqlite3.Error) as error:
             messagebox.showerror("Cannot delete manga", str(error), parent=self)
             return
-        self.feedback.set(f'Deleted "{entry["title"]}".')
+        self.feedback.set(f"Deleted {deleted} manga.")
         self.refresh_manga()
         self.manga_list.focus_set()
 

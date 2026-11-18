@@ -1,8 +1,8 @@
 # Personal Manga Reading Journal
 
 A local desktop manga journal built with Python, Tkinter, and SQLite. The
-current version lets you add manga, read saved reviews, edit entries, and
-delete entries, search titles, filter by status, and sort by rating. Your
+current version lets you add manga, read saved reviews, edit entries,
+delete selected entries, search titles, filter by status, and sort by rating. Your
 library persists across application restarts. The interface is a basic
 functional version; visual styling is the next step.
 
@@ -54,7 +54,21 @@ selected when a saved library opens. All actions stay in the same window:
 - Click **New manga** for an empty form, then **Save** to add it.
 - Click **Edit** to load the selected manga's existing fields into the form.
   **Save** updates that entry; **Cancel** returns to the review without saving.
-- Click **Delete**, then confirm, to remove the selected manga and its review.
+- Click **Delete selected**, then confirm, to remove the selected manga and
+  their reviews. Multiple selected manga are deleted in one transaction;
+  failure rolls back the entire batch.
+
+Use **Ctrl+click** to add or remove individual rows from the selection, or
+**Shift+click** to select a range. **Select all** selects every displayed row.
+**Ctrl+A** does the same when the manga list has keyboard focus; the shortcut
+is bound to the list shown rather than all entries.
+
+Selecting one manga shows its review and enables Edit. Selecting multiple
+manga shows their selection count on the right and disables Edit. Delete
+selected asks for confirmation once, including the number of manga when more
+than one is selected. It acts only on selected IDs; duplicate titles remain
+separate entries. To clear the entire library, use **Reset**, then **Select
+all** (or Ctrl+A in the list), then **Delete selected** and confirm.
 
 New and Edit temporarily replace the review panel with the form. Save returns
 to the review panel. Switching manga, starting another form, changing the list
@@ -74,10 +88,11 @@ The controls above the list work together:
 - **Reset:** clears the search, selects All statuses, restores title order, and
   selects the first manga, even if the controls were already at their defaults.
 
-Ordinary search, status, and sort changes keep the selected manga if it still
-matches. Otherwise, the first matching entry is selected. Reset always starts
-at the first manga. No matches shows a message and disables Edit and
-Delete; Reset returns to the whole library. The count shows matching entries
+Ordinary search, status, and sort changes keep selected manga that still
+match. Hidden rows are removed from the selection. If none of the selected
+rows match, the first matching entry is selected. Reset always starts with
+only the first manga selected. No matches shows a message and disables Edit,
+Delete selected, and Select all; Reset returns to the whole library. The count shows matching entries
 while search or status filtering is active. These controls affect the view,
 not the saved data, and start at their defaults when the app is reopened.
 
@@ -139,6 +154,13 @@ Reset to restore the list. If an edit changes an entry so it no longer matches
 the current filter, confirm the saved-but-hidden message and use Reset to
 find the updated entry.
 
+Select two rows with Ctrl+click and confirm the selection count and disabled
+Edit button. Cancel their deletion and check that both entries remain. Filter
+the list, Select all, then confirm deletion; only the displayed matching manga
+should be removed. Reset should reveal previously hidden entries. Verify
+deletions persist after restarting. Tests exercise these operations only on
+temporary libraries.
+
 Run the automated storage, validation, and UI workflow checks with:
 
 ```bash
@@ -187,8 +209,8 @@ requirements/
     requirements.txt          # Third-party dependency list
 tests/
     __init__.py
-    test_library.py            # Storage, validation, filtering, and rating order
-    test_ui.py                 # Forms, selection, draft protection, and list controls
+    test_library.py            # Storage, validation, filtering, and atomic bulk deletion
+    test_ui.py                 # Forms, multiple selection, draft protection, and controls
 ```
 
 Each Python package directory includes an `__init__.py` file.
