@@ -33,8 +33,29 @@ class MangaLibrary:
             review=review,
         )
 
-    def list_manga(self) -> list[sqlite3.Row]:
-        return self.database.list_manga()
+    def list_manga(
+        self, *, search: str = "", status: str = "", sort: str = "title"
+    ) -> list[sqlite3.Row]:
+        status = status.strip()
+        if status and status not in STATUSES:
+            raise ValueError("Choose one of the listed status filters.")
+        if sort not in ("title", "rating_asc", "rating_desc"):
+            raise ValueError("Choose one of the listed sort orders.")
+
+        query = search.strip().casefold()
+        manga = [
+            entry for entry in self.database.list_manga()
+            if query in entry["title"].casefold() and (not status or entry["status"] == status)
+        ]
+        # Sort by title first so equal ratings retain alphabetical order.
+        manga.sort(key=lambda entry: (entry["title"].casefold(), entry["id"]))
+        if sort == "title":
+            return manga
+
+        rated = [entry for entry in manga if entry["rating"] is not None]
+        unrated = [entry for entry in manga if entry["rating"] is None]
+        rated.sort(key=lambda entry: entry["rating"], reverse=(sort == "rating_desc"))
+        return rated + unrated
 
     def get_manga(self, manga_id: int) -> sqlite3.Row:
         entry = self.database.get_manga(manga_id)

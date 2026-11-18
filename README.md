@@ -2,9 +2,9 @@
 
 A local desktop manga journal built with Python, Tkinter, and SQLite. The
 current version lets you add manga, read saved reviews, edit entries, and
-delete entries. Your library persists across application restarts. The
-interface is a basic functional version; visual styling, search, filtering,
-and sorting are future steps.
+delete entries, search titles, filter by status, and sort by rating. Your
+library persists across application restarts. The interface is a basic
+functional version; visual styling is the next step.
 
 ## Setup (Git Bash on Windows)
 
@@ -57,9 +57,29 @@ selected when a saved library opens. All actions stay in the same window:
 - Click **Delete**, then confirm, to remove the selected manga and its review.
 
 New and Edit temporarily replace the review panel with the form. Save returns
-to the saved entry's review. Switching manga, starting another form, or closing
-the window asks before discarding a changed draft. Cancel explicitly discards
-the current draft. Edit and Delete are disabled for an empty library.
+to the review panel. Switching manga, starting another form, changing the list
+controls, or closing the window asks before discarding a changed draft. Cancel
+explicitly discards the current draft. Edit and Delete are disabled when no
+manga is selected.
+
+The controls above the list work together:
+
+- **Search title:** updates as you type and matches any part of a title,
+  ignoring case, including Unicode case differences. Surrounding search
+  whitespace is ignored; characters such as percent and underscore are literal.
+- **Status:** choose All, Not Started, Reading, Completed, or Dropped.
+- **Sort by:** defaults to Title (A–Z), with Rating: low to high and Rating:
+  high to low also available. Unrated entries stay last in both rating orders;
+  equal ratings are ordered alphabetically by title. A rating of 0 is rated.
+- **Reset:** clears the search, selects All statuses, restores title order, and
+  selects the first manga, even if the controls were already at their defaults.
+
+Ordinary search, status, and sort changes keep the selected manga if it still
+matches. Otherwise, the first matching entry is selected. Reset always starts
+at the first manga. No matches shows a message and disables Edit and
+Delete; Reset returns to the whole library. The count shows matching entries
+while search or status filtering is active. These controls affect the view,
+not the saved data, and start at their defaults when the app is reopened.
 
 Titles are trimmed and cannot be blank. Other fields are optional when adding:
 
@@ -72,9 +92,11 @@ Titles are trimmed and cannot be blank. Other fields are optional when adding:
   as 10.5. Leaving it blank means 0.
 - **Thoughts / review:** optional free-form text saved with the entry.
 
-The list displays titles alphabetically and keeps the saved entry selected
-after adding or editing. Database IDs identify entries, so editing a title
-does not create a duplicate and entries with the same title remain separate.
+After adding or editing, the saved entry stays selected if it matches the
+current search and status. Otherwise, a message explains that it was saved
+but is hidden by the current filters. Use Reset to find it. Database IDs
+identify entries, so editing a title does not create a duplicate and entries
+with the same title remain separate.
 
 ## Local storage
 
@@ -92,8 +114,9 @@ and source code. Rebuilding or moving the executable does not move the library.
 The single `manga` table contains `id`, `title`, `status`, `rating`,
 `current_chapter`, and `review`. SQL constraints back up input validation, and
 parameterized queries keep user text separate from SQL instructions.
-This step keeps the existing table structure, so previously saved entries
-and reviews remain available without a schema migration.
+Search and sorting happen in the library layer for this small local collection;
+search uses Python's Unicode-aware case folding. The table structure is
+unchanged, so saved entries and reviews remain available without a migration.
 
 ## Verify the workflows
 
@@ -108,6 +131,13 @@ remain. Invalid input should show an explanation and leave the draft intact.
 Cancel a deletion to verify the entry stays, then confirm deletion and restart
 to verify it is gone. Switching away from an unsaved draft should let you keep
 working or confirm discarding it.
+
+Combine a title fragment with a status filter, then try both rating orders.
+Check that unrated entries stay last, 0 remains a valid rating, and equal
+ratings stay alphabetically ordered. Search for a nonexistent title, then
+Reset to restore the list. If an edit changes an entry so it no longer matches
+the current filter, confirm the saved-but-hidden message and use Reset to
+find the updated entry.
 
 Run the automated storage, validation, and UI workflow checks with:
 
@@ -151,14 +181,14 @@ main.py                       # Entry point: starts the app's event loop
 manga_journal/
     __init__.py               # Marks the directory as a Python package
     ui.py                     # Library list, review panel, and add/edit form
-    library.py                # Shared validation and application operations
+    library.py                # Validation, title/status filtering, and sorting
     database.py               # Resolves storage location and runs SQLite queries
 requirements/
     requirements.txt          # Third-party dependency list
 tests/
     __init__.py
-    test_library.py            # Validation, persistence, and database constraints
-    test_ui.py                 # Review, add/edit/cancel, navigation, and deletion
+    test_library.py            # Storage, validation, filtering, and rating order
+    test_ui.py                 # Forms, selection, draft protection, and list controls
 ```
 
 Each Python package directory includes an `__init__.py` file.

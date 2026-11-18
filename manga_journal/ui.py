@@ -7,6 +7,13 @@ from tkinter import messagebox, ttk
 from .library import MangaLibrary, STATUSES
 
 
+SORT_OPTIONS = {
+    "Title (A–Z)": "title",
+    "Rating: low to high": "rating_asc",
+    "Rating: high to low": "rating_desc",
+}
+
+
 class MangaJournalApp(tk.Tk):
     def __init__(self, library: MangaLibrary) -> None:
         super().__init__()
@@ -26,11 +33,18 @@ class MangaJournalApp(tk.Tk):
         self.rating_input = tk.StringVar()
         self.chapter_input = tk.StringVar(value="0")
         self.status_hint = tk.StringVar()
+        self.search_input = tk.StringVar()
+        self.status_filter = tk.StringVar(value="All")
+        self.sort_input = tk.StringVar(value="Title (A–Z)")
+        self._restoring_filters = False
+        self._active_filters = self._filter_values()
         self.review_title = tk.StringVar(value="Select a manga")
         self.feedback = tk.StringVar(value="Select a manga to read your review, or add a new one.")
         self.count = tk.StringVar(value="0 manga")
         self._build_widgets()
         self.refresh_manga()
+        for variable in (self.search_input, self.status_filter, self.sort_input):
+            variable.trace_add("write", self._on_filters_changed)
         self.protocol("WM_DELETE_WINDOW", self._close_window)
         self.manga_list.focus_set()
 
@@ -50,8 +64,9 @@ class MangaJournalApp(tk.Tk):
         listing = ttk.Frame(content)
         listing.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
         listing.columnconfigure(0, weight=1)
-        listing.rowconfigure(1, weight=1)
-        ttk.Label(listing, textvariable=self.count).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        listing.rowconfigure(2, weight=1)
+        self._build_list_controls(listing)
+        ttk.Label(listing, textvariable=self.count).grid(row=1, column=0, sticky="w", pady=(0, 8))
         self.manga_list = ttk.Treeview(
             listing, columns=("title", "status", "rating", "chapter"), show="headings", selectmode="browse"
         )
@@ -63,10 +78,10 @@ class MangaJournalApp(tk.Tk):
         ):
             self.manga_list.heading(name, text=heading)
             self.manga_list.column(name, width=width, minwidth=60, stretch=(name == "title"))
-        self.manga_list.grid(row=1, column=0, sticky="nsew")
+        self.manga_list.grid(row=2, column=0, sticky="nsew")
         self.manga_list.bind("<<TreeviewSelect>>", self._on_manga_selected)
         scrollbar = ttk.Scrollbar(listing, orient="vertical", command=self.manga_list.yview)
-        scrollbar.grid(row=1, column=1, sticky="ns")
+        scrollbar.grid(row=2, column=1, sticky="ns")
         self.manga_list.configure(yscrollcommand=scrollbar.set)
 
         self.panel = ttk.Frame(content)
@@ -79,6 +94,65 @@ class MangaJournalApp(tk.Tk):
         ttk.Label(content, textvariable=self.feedback, wraplength=760).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=(12, 0)
         )
+
+    def _build_list_controls(self, listing: ttk.Frame) -> None:
+        controls = ttk.Frame(listing)
+        controls.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        controls.columnconfigure((0, 1), weight=1)
+        ttk.Label(controls, text="Search title").grid(row=0, column=0, sticky="w")
+        search = ttk.Frame(controls)
+        search.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        search.columnconfigure(0, weight=1)
+        self.search_entry = ttk.Entry(search, textvariable=self.search_input)
+        self.search_entry.grid(row=0, column=0, sticky="ew")
+        ttk.Button(search, text="Reset", command=self.reset_filters).grid(
+            row=0, column=1, padx=(8, 0)
+        )
+        ttk.Label(controls, text="Status").grid(row=2, column=0, sticky="w")
+        ttk.Label(controls, text="Sort by").grid(row=2, column=1, sticky="w", padx=(8, 0))
+        ttk.Combobox(
+            controls, textvariable=self.status_filter, values=("All", *STATUSES),
+            state="readonly", width=15,
+        ).grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        ttk.Combobox(
+            controls, textvariable=self.sort_input, values=tuple(SORT_OPTIONS),
+            state="readonly", width=20,
+        ).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(4, 0))
+
+    def _filter_values(self) -> tuple[str, str, str]:
+        return self.search_input.get(), self.status_filter.get(), self.sort_input.get()
+
+    def _set_filter_values(self, values: tuple[str, str, str]) -> None:
+        # Restore or reset all controls together, without refreshing three times.
+        self._restoring_filters = True
+        try:
+            self.search_input.set(values[0])
+            self.status_filter.set(values[1])
+            self.sort_input.set(values[2])
+        finally:
+            self._restoring_filters = False
+
+    def _on_filters_changed(self, *args: str, select_first: bool = False) -> None:
+        if self._restoring_filters:
+            return
+        requested = self._filter_values()
+        if requested == self._active_filters and not select_first:
+            return
+        if not self._confirm_discard():
+            self._set_filter_values(self._active_filters)
+            return
+        if self.refresh_manga(select_first=select_first):
+            self._active_filters = requested
+            self.feedback.set("")
+        else:
+            self._set_filter_values(self._active_filters)
+
+    def reset_filters(self) -> None:
+        self._set_filter_values(("", "All", "Title (A–Z)"))
+        self._on_filters_changed(select_first=True)
+
+    def _has_filters(self) -> bool:
+        return bool(self.search_input.get().strip() or self.status_filter.get() != "All")
 
     def _build_review_panel(self) -> None:
         self.review_panel = ttk.LabelFrame(self.panel, text="Your review", padding=12)
@@ -153,10 +227,16 @@ class MangaJournalApp(tk.Tk):
             row=0, column=1, sticky="ew", padx=(6, 0)
         )
 
-    def refresh_manga(self, preferred_id: int | None = None) -> bool:
+    def refresh_manga(
+        self, preferred_id: int | None = None, *, select_first: bool = False
+    ) -> bool:
         try:
-            manga = self.library.list_manga()
-        except sqlite3.Error as error:
+            manga = self.library.list_manga(
+                search=self.search_input.get(),
+                status="" if self.status_filter.get() == "All" else self.status_filter.get(),
+                sort=SORT_OPTIONS.get(self.sort_input.get(), ""),
+            )
+        except (ValueError, sqlite3.Error) as error:
             messagebox.showerror("Cannot load library", f"Could not load your manga.\n\n{error}", parent=self)
             return False
         children = self.manga_list.get_children()
@@ -170,10 +250,11 @@ class MangaJournalApp(tk.Tk):
                     format(entry["current_chapter"], ".15g"),
                 )
             )
-        self.count.set(f"{len(manga)} manga")
+        suffix = "matching manga" if self._has_filters() else "manga"
+        self.count.set(f"{len(manga)} {suffix}")
         entries = {entry["id"]: entry for entry in manga}
         target = preferred_id if preferred_id is not None else self.selected_id
-        selected = entries.get(target)
+        selected = None if select_first else entries.get(target)
         if selected is None and manga:
             selected = manga[0]
         self._show_review(selected)
@@ -188,9 +269,15 @@ class MangaJournalApp(tk.Tk):
         self.editing_id = None
         self._form_baseline = {}
         self.selected_id = entry["id"] if entry is not None else None
-        self.review_title.set(entry["title"] if entry is not None else "Select a manga")
+        self.review_title.set(
+            entry["title"] if entry is not None
+            else "No matching manga" if self._has_filters() else "Select a manga"
+        )
         if entry is None:
-            text = "Use New manga to add your first entry."
+            text = (
+                "Try another search or status, or use Reset to show the whole library."
+                if self._has_filters() else "Use New manga to add your first entry."
+            )
         else:
             text = entry["review"] or "No review yet."
         self.review_display.configure(state="normal")
@@ -309,7 +396,10 @@ class MangaJournalApp(tk.Tk):
         # Saving has succeeded; the draft must not be submitted a second time.
         self._show_review(None)
         self.feedback.set(f'{action} "{values["title"].strip()}".')
-        self.refresh_manga(manga_id)
+        if self.refresh_manga(manga_id) and self.selected_id != manga_id:
+            self.feedback.set(
+                f'{action} "{values["title"].strip()}". Hidden by the current search or status filter.'
+            )
         self.manga_list.focus_set()
 
     def delete_manga(self) -> None:

@@ -168,6 +168,59 @@ class MangaLibraryTests(unittest.TestCase):
             self.library.delete_manga(missing_id)
         self.assertEqual([entry["id"] for entry in self.library.list_manga()], [manga_id])
 
+    def test_search_matches_partial_titles_ignoring_unicode_case(self) -> None:
+        street_id = self.library.add_manga(title="Die Straße")
+        accent_id = self.library.add_manga(title="ÉCLAIR Adventures")
+        self.library.add_manga(title="Other")
+        self.assertEqual([entry["id"] for entry in self.library.list_manga(search="  STRASSE  ")], [street_id])
+        self.assertEqual([entry["id"] for entry in self.library.list_manga(search="éclair")], [accent_id])
+
+    def test_search_treats_percent_and_underscore_as_literal_text(self) -> None:
+        percent_id = self.library.add_manga(title="100% Manga")
+        underscore_id = self.library.add_manga(title="A_B")
+        self.library.add_manga(title="100X Manga")
+        self.library.add_manga(title="AxB")
+        self.assertEqual([entry["id"] for entry in self.library.list_manga(search="100%")], [percent_id])
+        self.assertEqual([entry["id"] for entry in self.library.list_manga(search="a_b")], [underscore_id])
+
+    def test_search_status_and_rating_sort_work_together(self) -> None:
+        low_id = self.library.add_manga(title="Saga Alpha", status="Reading", rating="50")
+        high_id = self.library.add_manga(title="SAGA Beta", status="Reading", rating="95")
+        unrated_id = self.library.add_manga(title="Saga Unrated", status="Reading")
+        self.library.add_manga(title="Saga Completed", status="Completed", rating="100")
+        self.library.add_manga(title="Other Reading", status="Reading", rating="100")
+        results = self.library.list_manga(search="saga", status="Reading", sort="rating_desc")
+        self.assertEqual([entry["id"] for entry in results], [high_id, low_id, unrated_id])
+        self.assertEqual(self.library.list_manga(search="saga", status="Dropped"), [])
+
+    def test_rating_sort_keeps_unrated_last_and_ties_alphabetical(self) -> None:
+        zulu = self.library.add_manga(title="Zulu", rating="90")
+        alpha = self.library.add_manga(title="alpha", rating="90")
+        top = self.library.add_manga(title="Top", rating="100")
+        zero = self.library.add_manga(title="Zero", rating="0")
+        unrated_z = self.library.add_manga(title="Z unrated")
+        unrated_a = self.library.add_manga(title="A unrated")
+        ascending = self.library.list_manga(sort="rating_asc")
+        descending = self.library.list_manga(sort="rating_desc")
+        self.assertEqual([entry["id"] for entry in ascending], [zero, alpha, zulu, top, unrated_a, unrated_z])
+        self.assertEqual([entry["id"] for entry in descending], [top, alpha, zulu, zero, unrated_a, unrated_z])
+
+    def test_invalid_list_options_are_rejected_without_changing_data(self) -> None:
+        manga_id = self.library.add_manga(title="Keep this")
+        with self.assertRaises(ValueError):
+            self.library.list_manga(status="Unknown")
+        with self.assertRaises(ValueError):
+            self.library.list_manga(sort="rating DESC; DROP TABLE manga")
+        self.assertEqual(self.library.get_manga(manga_id)["title"], "Keep this")
+
+    def test_filtering_and_sorting_do_not_modify_saved_entries(self) -> None:
+        self.library.add_manga(title="Saved", rating="0", review="Keep my review")
+        self.library.add_manga(title="Another", status="Reading", rating="100")
+        before = [dict(entry) for entry in self.library.list_manga()]
+        self.library.list_manga(search="saved", status="Not Started", sort="rating_desc")
+        self.library.list_manga(sort="rating_asc")
+        self.assertEqual([dict(entry) for entry in self.library.list_manga()], before)
+
 
 if __name__ == "__main__":
     unittest.main()

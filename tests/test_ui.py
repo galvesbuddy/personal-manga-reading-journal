@@ -1,6 +1,7 @@
 """Exercise review viewing and edit/delete workflows with temporary storage."""
 
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import tkinter as tk
 import unittest
@@ -152,6 +153,171 @@ class MangaUITests(unittest.TestCase):
         self.app.save_manga()
         self.assertEqual(self.library.get_manga(self.first_id)["current_chapter"], before)
         self.error.assert_not_called()
+
+    def test_search_updates_selection_and_reset_restores_library(self) -> None:
+        self.app.search_input.set("fIR")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), (str(self.first_id),))
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.app.search_input.set("second")
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.assertEqual(self.app.review_title.get(), "Second")
+        self.app.search_input.set("no such title")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), ())
+        self.assertIsNone(self.app.selected_id)
+        self.assertEqual(self.app.review_title.get(), "No matching manga")
+        self.assertEqual(self.app.count.get(), "0 matching manga")
+        self.assertTrue(self.app.edit_button.instate(["disabled"]))
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(len(self.app.manga_list.get_children()), 2)
+        self.assertEqual(self.app.count.get(), "2 manga")
+        self.assertEqual(len(self.library.list_manga()), 2)
+        self.error.assert_not_called()
+
+    def test_combined_controls_and_sort_preserve_matching_selection(self) -> None:
+        high_id = self.library.add_manga(title="First high", status="Dropped", rating="95")
+        self.app.search_input.set("first")
+        self.app.status_filter.set("Dropped")
+        self.app.sort_input.set("Rating: high to low")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), (str(high_id), str(self.first_id)))
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.app.status_filter.set("Not Started")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), ())
+        self.app.reset_filters()
+        self.assertEqual(len(self.app.manga_list.get_children()), 3)
+        self.error.assert_not_called()
+
+    def test_sort_keeps_unrated_selection_and_unrated_rows_last(self) -> None:
+        high_id = self.library.add_manga(title="High", rating="100")
+        self.app.refresh_manga()
+        self.select(self.second_id)
+        self.app.sort_input.set("Rating: high to low")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), (str(high_id), str(self.first_id), str(self.second_id)))
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.app.sort_input.set("Rating: low to high")
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), (str(self.first_id), str(high_id), str(self.second_id)))
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.error.assert_not_called()
+
+    def test_filter_change_can_be_cancelled_without_losing_draft(self) -> None:
+        self.app.start_edit()
+        self.app.review_input.insert("end", " Draft")
+        self.app.search_input.set("second")
+        self.app.update()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.app.search_input.get(), "")
+        self.assertEqual(self.app._mode, "edit")
+        self.assertTrue(self.app.review_input.get("1.0", "end-1c").endswith(" Draft"))
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.confirm.return_value = True
+        self.app.search_input.set("second")
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.assertEqual(self.app._mode, "view")
+        self.assertEqual(self.library.get_manga(self.first_id)["review"], "First review.\nSecond line.")
+        self.error.assert_not_called()
+
+    def test_reset_restores_all_controls_if_discard_is_declined(self) -> None:
+        self.app.search_input.set("first")
+        self.app.status_filter.set("Dropped")
+        self.app.sort_input.set("Rating: high to low")
+        self.app.start_edit()
+        self.app.title_input.set("Unsaved title")
+        self.app.reset_filters()
+        self.app.update()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.app.search_input.get(), "first")
+        self.assertEqual(self.app.status_filter.get(), "Dropped")
+        self.assertEqual(self.app.sort_input.get(), "Rating: high to low")
+        self.assertEqual(self.app.title_input.get(), "Unsaved title")
+        self.assertEqual(self.app._mode, "edit")
+        self.error.assert_not_called()
+
+    def test_reset_selects_first_manga_when_controls_are_already_default(self) -> None:
+        self.select(self.second_id)
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.assertEqual(self.app.manga_list.selection(), (str(self.first_id),))
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.confirm.assert_not_called()
+        self.error.assert_not_called()
+
+    def test_reset_selects_first_manga_after_filtering(self) -> None:
+        self.app.search_input.set("second")
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.assertEqual(self.app.manga_list.get_children()[0], str(self.first_id))
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.error.assert_not_called()
+
+    def test_reset_at_defaults_still_protects_unsaved_changes(self) -> None:
+        self.select(self.second_id)
+        self.app.start_edit()
+        self.app.title_input.set("Unsaved title")
+        self.app.reset_filters()
+        self.app.update()
+        self.confirm.assert_called_once()
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.assertEqual(self.app.title_input.get(), "Unsaved title")
+        self.assertEqual(self.app._mode, "edit")
+        self.confirm.return_value = True
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.first_id)
+        self.assertEqual(self.app._mode, "view")
+        self.assertEqual(self.library.get_manga(self.second_id)["title"], "Second")
+        self.error.assert_not_called()
+
+    def test_save_excluded_by_filter_is_saved_and_explained(self) -> None:
+        self.app.status_filter.set("Dropped")
+        self.app.start_edit()
+        self.app.status_input.set("Completed")
+        self.app.save_manga()
+        self.app.update()
+        self.assertEqual(self.library.get_manga(self.first_id)["status"], "Completed")
+        self.assertEqual(self.app.manga_list.get_children(), ())
+        self.assertIn("Hidden by the current search or status filter", self.app.feedback.get())
+        self.assertEqual(self.app.review_title.get(), "No matching manga")
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(len(self.app.manga_list.get_children()), 2)
+        self.assertEqual(self.displayed_review(), "First review.\nSecond line.")
+        self.error.assert_not_called()
+
+    def test_deleting_last_match_preserves_other_saved_manga(self) -> None:
+        self.app.status_filter.set("Dropped")
+        self.confirm.return_value = True
+        self.app.delete_manga()
+        self.app.update()
+        self.assertEqual(self.app.manga_list.get_children(), ())
+        self.assertEqual(self.app.review_title.get(), "No matching manga")
+        self.assertEqual(len(self.library.list_manga()), 1)
+        self.app.reset_filters()
+        self.app.update()
+        self.assertEqual(self.app.selected_id, self.second_id)
+        self.error.assert_not_called()
+
+    def test_failed_filter_query_restores_controls_and_previous_list(self) -> None:
+        before = self.app.manga_list.get_children()
+        with patch.object(self.library, "list_manga", side_effect=sqlite3.OperationalError("Test read failure")):
+            self.app.search_input.set("second")
+        self.app.update()
+        self.error.assert_called_once()
+        self.assertEqual(self.app.search_input.get(), "")
+        self.assertEqual(self.app.manga_list.get_children(), before)
+        self.assertEqual(self.app.selected_id, self.first_id)
 
 
 if __name__ == "__main__":
